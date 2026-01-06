@@ -240,7 +240,7 @@ class _SummaryRow extends StatelessWidget {
 
     final items = const [
       _SummaryItem(
-        title: 'Omzet Hari Ini',
+        title: 'Pendapatan Hari Ini',
         value: 'Rp 0',
         icon: Icons.payments_rounded,
         tone: _Tone.green,
