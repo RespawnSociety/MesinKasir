@@ -21,6 +21,16 @@ class _AdminProductsScreenState extends State<AdminProductsScreen> {
     decimalDigits: 0,
   );
 
+  // ====== NEW: categories ======
+  static const String _addCategoryValue = '__add_category__';
+  final List<String> _categories = [
+    'Makanan',
+    'Minuman',
+    'Snack',
+    'Lainnya',
+  ];
+  String? _selectedCategory;
+
   @override
   void dispose() {
     nameCtrl.dispose();
@@ -33,6 +43,42 @@ class _AdminProductsScreenState extends State<AdminProductsScreen> {
     return int.tryParse(raw);
   }
 
+  Future<String?> _showAddCategoryDialog() async {
+    final ctrl = TextEditingController();
+    final result = await showDialog<String?>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Tambah kategori'),
+          content: TextField(
+            controller: ctrl,
+            autofocus: true,
+            textInputAction: TextInputAction.done,
+            decoration: const InputDecoration(
+              hintText: 'Contoh: Dessert',
+            ),
+            onSubmitted: (_) => Navigator.pop(ctx, ctrl.text.trim()),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, null),
+              child: const Text('Batal'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              child: const Text('Tambah'),
+            ),
+          ],
+        );
+      },
+    );
+    ctrl.dispose();
+
+    final s = (result ?? '').trim();
+    if (s.isEmpty) return null;
+    return s;
+  }
+
   void addProduct() {
     FocusScope.of(context).unfocus();
 
@@ -40,17 +86,19 @@ class _AdminProductsScreenState extends State<AdminProductsScreen> {
 
     final name = nameCtrl.text.trim();
     final price = _parsePrice()!;
+    final category = _selectedCategory!;
 
-    ProductStore.add(name: name, price: price);
+    ProductStore.add(name: name, price: price, category: category);
 
     nameCtrl.clear();
     priceCtrl.clear();
+    setState(() {
+      _selectedCategory = null;
+    });
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Produk berhasil ditambahkan ✅')),
     );
-
-    setState(() {});
   }
 
   @override
@@ -95,6 +143,57 @@ class _AdminProductsScreenState extends State<AdminProductsScreen> {
                                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                                       fontWeight: FontWeight.w700,
                                     ),
+                              ),
+                              const SizedBox(height: 12),
+
+                              // ====== NEW: Category dropdown ======
+                              DropdownButtonFormField<String>(
+                                value: _selectedCategory,
+                                items: [
+                                  ..._categories.map(
+                                    (c) => DropdownMenuItem<String>(
+                                      value: c,
+                                      child: Text(c),
+                                    ),
+                                  ),
+                                  const DropdownMenuItem<String>(
+                                    value: _addCategoryValue,
+                                    child: Text('➕ Tambah kategori'),
+                                  ),
+                                ],
+                                onChanged: (v) async {
+                                  if (v == _addCategoryValue) {
+                                    final newCat = await _showAddCategoryDialog();
+                                    if (newCat == null) return;
+
+                                    final exists = _categories.any(
+                                      (x) => x.toLowerCase() == newCat.toLowerCase(),
+                                    );
+                                    setState(() {
+                                      if (!exists) _categories.add(newCat);
+                                      _selectedCategory = exists
+                                          ? _categories.firstWhere(
+                                              (x) => x.toLowerCase() == newCat.toLowerCase(),
+                                            )
+                                          : newCat;
+                                    });
+                                  } else {
+                                    setState(() => _selectedCategory = v);
+                                  }
+                                },
+                                decoration: InputDecoration(
+                                  labelText: 'Kategori',
+                                  prefixIcon: const Icon(Icons.category_rounded),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                ),
+                                validator: (v) {
+                                  if (v == null || v == _addCategoryValue) {
+                                    return 'Kategori wajib dipilih';
+                                  }
+                                  return null;
+                                },
                               ),
                               const SizedBox(height: 12),
 
@@ -221,8 +320,11 @@ class _AdminProductsScreenState extends State<AdminProductsScreen> {
                             p.name,
                             style: const TextStyle(fontWeight: FontWeight.w600),
                           ),
-                          subtitle: Text(_rupiah.format(p.price)),
-                          trailing: const Icon(Icons.chevron_right_rounded),
+                          subtitle: Text('${_rupiah.format(p.price)} • ${p.category}'),
+                          trailing: Chip(
+                            label: Text(p.category),
+                            visualDensity: VisualDensity.compact,
+                          ),
                         );
                       },
                     ),
@@ -342,7 +444,6 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-/// Formatter sederhana untuk memformat angka menjadi ribuan: 15000 -> 15.000
 class _ThousandSeparatorInputFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
@@ -352,7 +453,6 @@ class _ThousandSeparatorInputFormatter extends TextInputFormatter {
     final number = int.parse(digits);
     final formatted = NumberFormat('#,###', 'id_ID').format(number).replaceAll(',', '.');
 
-    // Cursor tetap di akhir biar simpel & nyaman
     return TextEditingValue(
       text: formatted,
       selection: TextSelection.collapsed(offset: formatted.length),

@@ -2,20 +2,35 @@ class Product {
   final String id;
   final String name;
   final int price;
+  final String category;
 
-  const Product({required this.id, required this.name, required this.price});
+  const Product({
+    required this.id,
+    required this.name,
+    required this.price,
+    required this.category,
+  });
 }
 
 class ProductStore {
-  ProductStore._();
+  static final List<Product> _products = [];
+  static int _autoId = 1;
 
-  static final List<Product> products = [
-    const Product(id: 'p1', name: 'Es Teh', price: 5000),
-    const Product(id: 'p2', name: 'Kopi Susu', price: 18000),
-  ];
+  static List<Product> get products => List.unmodifiable(_products);
 
-  static void add({required String name, required int price}) {
-    final id = 'p${products.length + 1}';
-    products.add(Product(id: id, name: name, price: price));
+  static void add({
+    required String name,
+    required int price,
+    required String category,
+  }) {
+    final id = (_autoId++).toString();
+    _products.add(
+      Product(
+        id: id,
+        name: name.trim(),
+        price: price,
+        category: category.trim(),
+      ),
+    );
   }
 }

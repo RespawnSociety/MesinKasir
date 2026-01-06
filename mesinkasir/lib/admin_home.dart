@@ -3,6 +3,7 @@ import 'admin_products_screen.dart';
 import 'manage_kasir_screen.dart';
 import 'login_screen.dart';
 import 'reports_screen.dart';
+import 'stock_store_widget.dart';
 
 class AdminHome extends StatelessWidget {
   const AdminHome({super.key});
@@ -38,7 +39,7 @@ class AdminHome extends StatelessWidget {
             flexibleSpace: FlexibleSpaceBar(
               titlePadding: const EdgeInsetsDirectional.only(start: 16, bottom: 14),
               title: const Text('Dashboard Pemilik'),
-              background: _HeaderBackground(
+              background: const _HeaderBackground(
                 title: 'Halo, Pemilik 👋',
                 subtitle: 'Pantau bisnis kamu dari sini',
               ),
@@ -48,14 +49,14 @@ class AdminHome extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
             sliver: SliverList(
               delegate: SliverChildListDelegate(
-                [
-                  const _SummaryRow(),
-                  const SizedBox(height: 16),
+                const [
+                  _SummaryRow(),
+                  SizedBox(height: 16),
                   _SectionTitle(
                     title: 'Menu Utama',
                     subtitle: 'Kelola operasional toko kamu',
                   ),
-                  const SizedBox(height: 12),
+                  SizedBox(height: 12),
                 ],
               ),
             ),
@@ -71,7 +72,7 @@ class AdminHome extends StatelessWidget {
                 _DashboardTile(
                   icon: Icons.bar_chart_rounded,
                   title: 'Laporan',
-                  subtitle: 'Omzet, transaksi, produk',
+                  subtitle: 'Omset, transaksi, produk',
                   tone: _Tone.blue,
                   onTap: () {
                     Navigator.push(
@@ -107,11 +108,12 @@ class AdminHome extends StatelessWidget {
                 _DashboardTile(
                   icon: Icons.warehouse_rounded,
                   title: 'Stok',
-                  subtitle: 'Masuk/keluar (nanti)',
+                  subtitle: 'Tambah & atur stok',
                   tone: _Tone.teal,
                   onTap: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Stok: nanti kita bikin')),
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const StockScreen()),
                     );
                   },
                 ),
@@ -507,4 +509,3 @@ class _Blob extends StatelessWidget {
     );
   }
 }
-
