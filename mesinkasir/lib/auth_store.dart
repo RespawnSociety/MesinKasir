@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
-import 'login_screen.dart';
 
 class UserAccount {
   final String username;
@@ -55,8 +54,8 @@ class AuthUser {
 
     return AuthUser(
       id: id,
-      username: (json['username'] ?? json['email'] ?? '') as String,
-      role: (json['role'] ?? 'kasir') as String,
+      username: (json['username'] ?? json['email'] ?? '').toString(),
+      role: (json['role'] ?? 'kasir').toString(),
       active: active,
     );
   }
@@ -66,34 +65,223 @@ class AuthStore {
   AuthStore._();
 
   static final List<UserAccount> users = [];
-
-  static void createKasir({required String username, required String pin}) {
-    users.add(UserAccount(username: username, pin: pin, role: 'kasir'));
-  }
-
-  static void toggleActive(String username) {
-    final idx = users.indexWhere((u) => u.username == username);
-    if (idx == -1) return;
-    users[idx] = users[idx].copyWith(active: !users[idx].active);
-  }
-  // ====================================================================
+  static String? lastError;
 
   static const _storage = FlutterSecureStorage();
   static const _tokenKey = 'auth_token';
 
-  static const String baseUrl = 'http://127.0.0.1:8000';
-  // static const String baseUrl = 'http://10.0.2.2:8000'; // aktifkan ini kalau pakai Android emulator
+  static const String baseUrl = 'http://172.17.47.103:8000';
 
   static Future<String?> token() => _storage.read(key: _tokenKey);
   static Future<void> saveToken(String token) =>
       _storage.write(key: _tokenKey, value: token);
   static Future<void> clearToken() => _storage.delete(key: _tokenKey);
 
+  static dynamic _tryJson(String s) {
+    try {
+      return jsonDecode(s);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static String _errFromResponse(http.Response res) {
+    final body = _tryJson(res.body);
+    if (body is Map) {
+      final msg = body['message'];
+      if (msg != null && msg.toString().trim().isNotEmpty)
+        return msg.toString();
+
+      final errors = body['errors'];
+      if (errors is Map) {
+        for (final v in errors.values) {
+          if (v is List && v.isNotEmpty) return v.first.toString();
+          if (v != null) return v.toString();
+        }
+      }
+    }
+    return 'HTTP ${res.statusCode}';
+  }
+
+  static Future<Map<String, String>> _headers({bool json = false}) async {
+    final t = await token();
+    final h = <String, String>{
+      'Accept': 'application/json',
+      if (json) 'Content-Type': 'application/json',
+    };
+    if (t != null && t.isNotEmpty) {
+      h['Authorization'] = 'Bearer $t';
+    }
+    return h;
+  }
+
+  static Future<bool> fetchKasirs() async {
+    lastError = null;
+
+    final res = await http.get(
+      Uri.parse('$baseUrl/api/kasirs'),
+      headers: await _headers(),
+    );
+
+    if (res.statusCode == 401) {
+      users.clear();
+      await clearToken();
+      lastError = 'Unauthorized';
+      return false;
+    }
+
+    if (res.statusCode != 200) {
+      lastError = _errFromResponse(res);
+      return false;
+    }
+
+    final body = _tryJson(res.body);
+    final list = body is List ? body : (body is Map ? body['data'] : null);
+    if (list is! List) {
+      lastError = 'Format response tidak valid';
+      return false;
+    }
+
+    users
+      ..clear()
+      ..addAll(
+        list.map((e) {
+          final m = Map<String, dynamic>.from(e as Map);
+
+          final rawActive = m['active'];
+          final bool active = rawActive is bool
+              ? rawActive
+              : rawActive is int
+              ? rawActive == 1
+              : (rawActive?.toString().toLowerCase() == '1' ||
+                    rawActive?.toString().toLowerCase() == 'true');
+
+          return UserAccount(
+            username: (m['username'] ?? m['email'] ?? '').toString(),
+            pin: '',
+            role: (m['role'] ?? 'kasir').toString(),
+            active: active,
+          );
+        }).toList(),
+      );
+
+    return true;
+  }
+
+  static Future<bool> createKasir({
+    required String username,
+    required String pin,
+  }) async {
+    lastError = null;
+
+    final res = await http.post(
+      Uri.parse('$baseUrl/api/kasirs'),
+      headers: await _headers(json: true),
+      body: jsonEncode({'username': username, 'pin': pin}),
+    );
+
+    if (res.statusCode == 401) {
+      await clearToken();
+      lastError = 'Unauthorized';
+      return false;
+    }
+
+    if (res.statusCode != 201 && res.statusCode != 200) {
+      lastError = _errFromResponse(res);
+      return false;
+    }
+
+    return await fetchKasirs();
+  }
+
+  static Future<bool> setKasirActive({
+    required String username,
+    required bool active,
+  }) async {
+    lastError = null;
+
+    final res = await http.patch(
+      Uri.parse('$baseUrl/api/kasirs/$username/active'),
+      headers: await _headers(json: true),
+      body: jsonEncode({'active': active}),
+    );
+
+    if (res.statusCode == 401) {
+      await clearToken();
+      lastError = 'Unauthorized';
+      return false;
+    }
+
+    if (res.statusCode != 200) {
+      lastError = _errFromResponse(res);
+      return false;
+    }
+
+    final idx = users.indexWhere((u) => u.username == username);
+    if (idx != -1) {
+      users[idx] = users[idx].copyWith(active: active);
+    }
+    return true;
+  }
+
+  static Future<bool> resetKasirPin({
+    required String username,
+    required String pin,
+  }) async {
+    lastError = null;
+
+    final res = await http.patch(
+      Uri.parse('$baseUrl/api/kasirs/$username/pin'),
+      headers: await _headers(json: true),
+      body: jsonEncode({'pin': pin}),
+    );
+
+    if (res.statusCode == 401) {
+      users.clear();
+      await clearToken();
+      lastError = 'Unauthorized';
+      return false;
+    }
+
+    if (res.statusCode != 200) {
+      lastError = _errFromResponse(res);
+      return false;
+    }
+
+    return true;
+  }
+
+  static Future<bool> deleteKasir({required String username}) async {
+    lastError = null;
+
+    final res = await http.delete(
+      Uri.parse('$baseUrl/api/kasirs/$username'),
+      headers: await _headers(),
+    );
+
+    if (res.statusCode == 401) {
+      users.clear();
+      await clearToken();
+      lastError = 'Unauthorized';
+      return false;
+    }
+
+    if (res.statusCode != 200) {
+      lastError = _errFromResponse(res);
+      return false;
+    }
+
+    users.removeWhere((u) => u.username == username);
+    return true;
+  }
+
   static Future<AuthUser?> login({
     required String email,
     required String password,
     String deviceName = 'pc',
   }) async {
+    lastError = null;
+
     final res = await http.post(
       Uri.parse('$baseUrl/api/login'),
       headers: const {
@@ -108,24 +296,42 @@ class AuthStore {
     );
 
     if (res.statusCode != 200) {
+      lastError = _errFromResponse(res);
       return null;
     }
 
-    final root = jsonDecode(res.body) as Map<String, dynamic>;
+    final root = _tryJson(res.body);
+    if (root is! Map<String, dynamic>) {
+      lastError = 'Format response login tidak valid';
+      return null;
+    }
+
     final data = (root['data'] is Map<String, dynamic>)
         ? (root['data'] as Map<String, dynamic>)
         : root;
 
-    final t = (data['token'] ?? data['access_token']) as String?;
-    final u = data['user'] as Map<String, dynamic>?;
+    final t = (data['token'] ?? data['access_token'])?.toString();
+    final u = data['user'] is Map<String, dynamic>
+        ? data['user'] as Map<String, dynamic>
+        : null;
 
-    if (t == null || t.isEmpty || u == null) return null;
+    if (t == null || t.isEmpty || u == null) {
+      lastError = 'Token/user tidak ada di response';
+      return null;
+    }
 
     await saveToken(t);
-    return AuthUser.fromJson(u);
+
+    final user = AuthUser.fromJson(u);
+    if (user.role == 'admin') {
+      await fetchKasirs();
+    }
+    return user;
   }
 
   static Future<AuthUser?> me() async {
+    lastError = null;
+
     final t = await token();
     if (t == null || t.isEmpty) return null;
 
@@ -139,23 +345,34 @@ class AuthStore {
     );
 
     if (res.statusCode == 401) {
+      users.clear();
       await clearToken();
+      lastError = 'Unauthorized';
       return null;
     }
 
     if (res.statusCode != 200) {
-      // Debug kalau perlu:
-      // print('ME ERROR ${res.statusCode}: ${res.body}');
+      lastError = _errFromResponse(res);
       return null;
     }
 
-    final data = jsonDecode(res.body) as Map<String, dynamic>;
-    return AuthUser.fromJson(data);
+    final data = _tryJson(res.body);
+    if (data is! Map<String, dynamic>) {
+      lastError = 'Format response me tidak valid';
+      return null;
+    }
+
+    final user = AuthUser.fromJson(data);
+    if (user.role == 'admin') {
+      await fetchKasirs();
+    }
+    return user;
   }
 
   static Future<void> logout() async {
-    final t = await token();
+    lastError = null;
 
+    final t = await token();
     if (t != null && t.isNotEmpty) {
       await http.post(
         Uri.parse('$baseUrl/api/logout'),
@@ -163,6 +380,7 @@ class AuthStore {
       );
     }
 
+    users.clear();
     await clearToken();
   }
 }
