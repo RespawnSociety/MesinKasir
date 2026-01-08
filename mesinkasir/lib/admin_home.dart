@@ -5,6 +5,7 @@ import 'login_screen.dart';
 import 'reports_screen.dart';
 import 'stock_store_widget.dart';
 import 'auth_store.dart';
+import 'pengaturan_toko_screen.dart';
 
 class AdminHome extends StatelessWidget {
   const AdminHome({super.key});
@@ -145,10 +146,9 @@ class AdminHome extends StatelessWidget {
                   subtitle: 'Printer, metode bayar',
                   tone: _Tone.gray,
                   onTap: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Pengaturan: nanti kita bikin'),
-                      ),
+                   Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const PengaturanTokoScreen()),
                     );
                   },
                 ),
