@@ -21,6 +21,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/categories', [PengaturantokoController::class, 'categories']);
     Route::post('/categories', [PengaturantokoController::class, 'createCategory']);
     Route::patch('/categories/{category}/active', [PengaturantokoController::class, 'setCategoryActive']);
-    Route::patch('/categories/{category}', [PengaturantokoController::class, 'updateCategory']); // optional
+    Route::patch('/categories/{category}', [PengaturantokoController::class, 'updateCategory']);
     Route::delete('/categories/{category}', [PengaturantokoController::class, 'deleteCategory']);
 });

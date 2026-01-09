@@ -1,7 +1,34 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'product_store.dart';
+import 'auth_store.dart';
+
+class _Cat {
+  final int id;
+  final String name;
+  final bool active;
+
+  const _Cat({required this.id, required this.name, required this.active});
+
+  factory _Cat.fromJson(Map<String, dynamic> json) {
+    final rawActive = json['active'];
+    final bool active = rawActive is bool
+        ? rawActive
+        : rawActive is int
+            ? rawActive == 1
+            : (rawActive?.toString().toLowerCase() == '1' ||
+                rawActive?.toString().toLowerCase() == 'true');
+
+    return _Cat(
+      id: (json['id'] is int) ? json['id'] as int : int.tryParse('${json['id']}') ?? 0,
+      name: (json['name'] ?? '').toString(),
+      active: active,
+    );
+  }
+}
 
 class AdminProductsScreen extends StatefulWidget {
   const AdminProductsScreen({super.key});
@@ -21,15 +48,16 @@ class _AdminProductsScreenState extends State<AdminProductsScreen> {
     decimalDigits: 0,
   );
 
-  // ====== NEW: categories ======
-  static const String _addCategoryValue = '__add_category__';
-  final List<String> _categories = [
-    'Makanan',
-    'Minuman',
-    'Snack',
-    'Lainnya',
-  ];
   String? _selectedCategory;
+
+  final List<_Cat> _categories = [];
+  bool _loadingCats = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchCategories();
+  }
 
   @override
   void dispose() {
@@ -43,45 +71,84 @@ class _AdminProductsScreenState extends State<AdminProductsScreen> {
     return int.tryParse(raw);
   }
 
-  Future<String?> _showAddCategoryDialog() async {
-    final ctrl = TextEditingController();
-    final result = await showDialog<String?>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Tambah kategori'),
-          content: TextField(
-            controller: ctrl,
-            autofocus: true,
-            textInputAction: TextInputAction.done,
-            decoration: const InputDecoration(
-              hintText: 'Contoh: Dessert',
-            ),
-            onSubmitted: (_) => Navigator.pop(ctx, ctrl.text.trim()),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, null),
-              child: const Text('Batal'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-              child: const Text('Tambah'),
-            ),
-          ],
-        );
-      },
-    );
-    ctrl.dispose();
+  dynamic _tryJson(String s) {
+    try {
+      return jsonDecode(s);
+    } catch (_) {
+      return null;
+    }
+  }
 
-    final s = (result ?? '').trim();
-    if (s.isEmpty) return null;
-    return s;
+  String _errMsg(http.Response res) {
+    final body = _tryJson(res.body);
+    if (body is Map) {
+      final msg = body['message'];
+      if (msg != null && msg.toString().trim().isNotEmpty) return msg.toString();
+      final errors = body['errors'];
+      if (errors is Map) {
+        for (final v in errors.values) {
+          if (v is List && v.isNotEmpty) return v.first.toString();
+          if (v != null) return v.toString();
+        }
+      }
+    }
+    return 'HTTP ${res.statusCode}';
+  }
+
+  Future<Map<String, String>> _authHeaders({bool json = false}) async {
+    final t = await AuthStore.token();
+    final h = <String, String>{
+      'Accept': 'application/json',
+      if (json) 'Content-Type': 'application/json',
+    };
+    if (t != null && t.isNotEmpty) {
+      h['Authorization'] = 'Bearer $t';
+    }
+    return h;
+  }
+
+  Future<void> _fetchCategories() async {
+    setState(() => _loadingCats = true);
+
+    final res = await http.get(
+      Uri.parse('${AuthStore.baseUrl}/api/categories'),
+      headers: await _authHeaders(),
+    );
+
+    if (res.statusCode != 200) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_errMsg(res))),
+        );
+      }
+      if (mounted) setState(() => _loadingCats = false);
+      return;
+    }
+
+    final body = _tryJson(res.body);
+    final list = body is List ? body : (body is Map ? body['data'] : null);
+
+    _categories.clear();
+    if (list is List) {
+      _categories.addAll(
+        list
+            .map((e) => _Cat.fromJson(Map<String, dynamic>.from(e as Map)))
+            .where((c) => c.active)
+            .toList(),
+      );
+      _categories.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    }
+
+    if (_selectedCategory != null) {
+      final ok = _categories.any((c) => c.name == _selectedCategory);
+      if (!ok) _selectedCategory = null;
+    }
+
+    if (mounted) setState(() => _loadingCats = false);
   }
 
   void addProduct() {
     FocusScope.of(context).unfocus();
-
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
     final name = nameCtrl.text.trim();
@@ -92,9 +159,7 @@ class _AdminProductsScreenState extends State<AdminProductsScreen> {
 
     nameCtrl.clear();
     priceCtrl.clear();
-    setState(() {
-      _selectedCategory = null;
-    });
+    setState(() => _selectedCategory = null);
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Produk berhasil ditambahkan ✅')),
@@ -109,9 +174,16 @@ class _AdminProductsScreenState extends State<AdminProductsScreen> {
       appBar: AppBar(
         title: const Text('Admin Produk'),
         centerTitle: true,
+        actions: [
+          IconButton(
+            onPressed: _loadingCats ? null : () async => await _fetchCategories(),
+            icon: const Icon(Icons.refresh_rounded),
+          ),
+        ],
       ),
       body: SafeArea(
         child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
             SliverPadding(
               padding: const EdgeInsets.all(16),
@@ -125,7 +197,6 @@ class _AdminProductsScreenState extends State<AdminProductsScreen> {
                     ),
                     const SizedBox(height: 14),
 
-                    // Form Card
                     Card(
                       elevation: 0,
                       shape: RoundedRectangleBorder(
@@ -146,55 +217,37 @@ class _AdminProductsScreenState extends State<AdminProductsScreen> {
                               ),
                               const SizedBox(height: 12),
 
-                              // ====== NEW: Category dropdown ======
                               DropdownButtonFormField<String>(
                                 value: _selectedCategory,
-                                items: [
-                                  ..._categories.map(
-                                    (c) => DropdownMenuItem<String>(
-                                      value: c,
-                                      child: Text(c),
-                                    ),
-                                  ),
-                                  const DropdownMenuItem<String>(
-                                    value: _addCategoryValue,
-                                    child: Text('➕ Tambah kategori'),
-                                  ),
-                                ],
-                                onChanged: (v) async {
-                                  if (v == _addCategoryValue) {
-                                    final newCat = await _showAddCategoryDialog();
-                                    if (newCat == null) return;
-
-                                    final exists = _categories.any(
-                                      (x) => x.toLowerCase() == newCat.toLowerCase(),
-                                    );
-                                    setState(() {
-                                      if (!exists) _categories.add(newCat);
-                                      _selectedCategory = exists
-                                          ? _categories.firstWhere(
-                                              (x) => x.toLowerCase() == newCat.toLowerCase(),
-                                            )
-                                          : newCat;
-                                    });
-                                  } else {
-                                    setState(() => _selectedCategory = v);
-                                  }
-                                },
+                                items: _categories
+                                    .map(
+                                      (c) => DropdownMenuItem<String>(
+                                        value: c.name,
+                                        child: Text(c.name),
+                                      ),
+                                    )
+                                    .toList(),
+                                onChanged: _loadingCats ? null : (v) => setState(() => _selectedCategory = v),
                                 decoration: InputDecoration(
                                   labelText: 'Kategori',
                                   prefixIcon: const Icon(Icons.category_rounded),
+                                  suffixIcon: _loadingCats
+                                      ? const Padding(
+                                          padding: EdgeInsets.all(12),
+                                          child: SizedBox(
+                                            width: 18,
+                                            height: 18,
+                                            child: CircularProgressIndicator(strokeWidth: 2),
+                                          ),
+                                        )
+                                      : null,
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(14),
                                   ),
                                 ),
-                                validator: (v) {
-                                  if (v == null || v == _addCategoryValue) {
-                                    return 'Kategori wajib dipilih';
-                                  }
-                                  return null;
-                                },
+                                validator: (v) => (v == null) ? 'Kategori wajib dipilih' : null,
                               ),
+
                               const SizedBox(height: 12),
 
                               TextFormField(
@@ -215,6 +268,7 @@ class _AdminProductsScreenState extends State<AdminProductsScreen> {
                                   return null;
                                 },
                               ),
+
                               const SizedBox(height: 12),
 
                               TextFormField(
@@ -232,8 +286,7 @@ class _AdminProductsScreenState extends State<AdminProductsScreen> {
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(14),
                                   ),
-                                  helperText:
-                                      'Masukkan angka tanpa titik/koma (akan diformat otomatis).',
+                                  helperText: 'Masukkan angka tanpa titik/koma (akan diformat otomatis).',
                                 ),
                                 validator: (_) {
                                   final p = _parsePrice();
@@ -244,6 +297,7 @@ class _AdminProductsScreenState extends State<AdminProductsScreen> {
                                 },
                                 onFieldSubmitted: (_) => addProduct(),
                               ),
+
                               const SizedBox(height: 14),
 
                               SizedBox(
@@ -262,7 +316,6 @@ class _AdminProductsScreenState extends State<AdminProductsScreen> {
 
                     const SizedBox(height: 14),
 
-                    // List header
                     Row(
                       children: [
                         Text(
@@ -284,7 +337,6 @@ class _AdminProductsScreenState extends State<AdminProductsScreen> {
               ),
             ),
 
-            // List / empty state
             if (products.isEmpty)
               SliverFillRemaining(
                 hasScrollBody: false,
@@ -358,10 +410,7 @@ class _HeaderCard extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
         gradient: LinearGradient(
-          colors: [
-            color.withOpacity(0.15),
-            color.withOpacity(0.06),
-          ],
+          colors: [color.withOpacity(0.15), color.withOpacity(0.06)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -390,10 +439,7 @@ class _HeaderCard extends StatelessWidget {
                       ),
                 ),
                 const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
+                Text(subtitle, style: Theme.of(context).textTheme.bodyMedium),
               ],
             ),
           ),
