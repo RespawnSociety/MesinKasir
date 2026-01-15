@@ -130,11 +130,18 @@ class _PosScreenState extends State<PosScreen> {
   }
 
   void _inc(String id) {
-    setState(() {
-      final it = _cart[id];
-      if (it != null) it.qty += 1;
-    });
-  }
+  setState(() {
+    final it = _cart[id];
+    if (it != null) {
+      it.qty += 1;
+      return;
+    }
+
+    final idx = _products.indexWhere((x) => x.id == id);
+    if (idx == -1) return;
+    _cart[id] = _CartItem(product: _products[idx], qty: 1);
+  });
+}
 
   void _dec(String id) {
     setState(() {
