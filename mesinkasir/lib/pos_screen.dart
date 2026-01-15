@@ -1,8 +1,30 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'auth_store.dart';
+
+class RupiahInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final digits = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.isEmpty) {
+      return const TextEditingValue(text: '');
+    }
+
+    final n = int.parse(digits);
+    final formatted = NumberFormat.decimalPattern('id_ID').format(n);
+
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: formatted.length),
+    );
+  }
+}
 
 class PosProduct {
   final String id;
@@ -22,14 +44,10 @@ class PosProduct {
     final id = rawId is int ? rawId.toString() : (rawId ?? '').toString();
 
     final rawPrice = json['price'];
-    final price = rawPrice is int
-        ? rawPrice
-        : int.tryParse('${rawPrice ?? 0}') ?? 0;
+    final price = rawPrice is int ? rawPrice : int.tryParse('${rawPrice ?? 0}') ?? 0;
 
     final cat = json['category'];
-    final categoryName = (cat is Map && cat['name'] != null)
-        ? cat['name'].toString()
-        : '-';
+    final categoryName = (cat is Map && cat['name'] != null) ? cat['name'].toString() : '-';
 
     return PosProduct(
       id: id,
@@ -50,7 +68,6 @@ class _CartItem {
 }
 
 enum PayMethod { cash, qris, transfer }
-
 enum ProductView { grid, list }
 
 class PosScreen extends StatefulWidget {
@@ -79,6 +96,9 @@ class _PosScreenState extends State<PosScreen> {
   @override
   void initState() {
     super.initState();
+    _cashCtrl.addListener(() {
+      if (mounted) setState(() {});
+    });
     _loadAll();
   }
 
@@ -130,18 +150,18 @@ class _PosScreenState extends State<PosScreen> {
   }
 
   void _inc(String id) {
-  setState(() {
-    final it = _cart[id];
-    if (it != null) {
-      it.qty += 1;
-      return;
-    }
+    setState(() {
+      final it = _cart[id];
+      if (it != null) {
+        it.qty += 1;
+        return;
+      }
 
-    final idx = _products.indexWhere((x) => x.id == id);
-    if (idx == -1) return;
-    _cart[id] = _CartItem(product: _products[idx], qty: 1);
-  });
-}
+      final idx = _products.indexWhere((x) => x.id == id);
+      if (idx == -1) return;
+      _cart[id] = _CartItem(product: _products[idx], qty: 1);
+    });
+  }
 
   void _dec(String id) {
     setState(() {
@@ -179,11 +199,7 @@ class _PosScreenState extends State<PosScreen> {
       final data = root['data'];
 
       if (data is List) {
-        final list = data
-            .whereType<Map>()
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList();
-
+        final list = data.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
         if (!mounted) return;
         setState(() => _categories = list);
       }
@@ -203,9 +219,7 @@ class _PosScreenState extends State<PosScreen> {
       if (_search.trim().isNotEmpty) qp['search'] = _search.trim();
       if (_categoryId != null) qp['category_id'] = _categoryId.toString();
 
-      final uri = Uri.parse(
-        '${AuthStore.baseUrl}/api/kasir/products',
-      ).replace(queryParameters: qp);
+      final uri = Uri.parse('${AuthStore.baseUrl}/api/kasir/products').replace(queryParameters: qp);
 
       final res = await http.get(
         uri,
@@ -290,10 +304,7 @@ class _PosScreenState extends State<PosScreen> {
                 prefixIcon: Icon(Icons.search_rounded),
                 hintText: 'Cari produk...',
                 border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 16,
-                ),
+                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
               ),
               onChanged: (v) => _search = v,
               onSubmitted: (_) => _fetchProducts(),
@@ -308,10 +319,7 @@ class _PosScreenState extends State<PosScreen> {
                 prefixIcon: Icon(Icons.category_rounded),
                 border: OutlineInputBorder(),
                 hintText: 'Kategori',
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 16,
-                ),
+                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
               ),
               items: [
                 const DropdownMenuItem<int?>(
@@ -319,9 +327,7 @@ class _PosScreenState extends State<PosScreen> {
                   child: Text('Semua kategori'),
                 ),
                 ..._categories.map((c) {
-                  final id = c['id'] is int
-                      ? c['id'] as int
-                      : int.tryParse('${c['id']}');
+                  final id = c['id'] is int ? c['id'] as int : int.tryParse('${c['id']}');
                   final name = (c['name'] ?? '-').toString();
                   return DropdownMenuItem<int?>(value: id, child: Text(name));
                 }).toList(),
@@ -336,16 +342,10 @@ class _PosScreenState extends State<PosScreen> {
           IconButton.filledTonal(
             onPressed: () {
               setState(() {
-                _view = _view == ProductView.grid
-                    ? ProductView.list
-                    : ProductView.grid;
+                _view = _view == ProductView.grid ? ProductView.list : ProductView.grid;
               });
             },
-            icon: Icon(
-              _view == ProductView.grid
-                  ? Icons.view_list_rounded
-                  : Icons.grid_view_rounded,
-            ),
+            icon: Icon(_view == ProductView.grid ? Icons.view_list_rounded : Icons.grid_view_rounded),
           ),
           const SizedBox(width: 10),
           IconButton.filledTonal(
@@ -370,10 +370,7 @@ class _PosScreenState extends State<PosScreen> {
                     prefixIcon: Icon(Icons.search_rounded),
                     hintText: 'Cari produk...',
                     border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 16,
-                    ),
+                    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
                   ),
                   onChanged: (v) => _search = v,
                   onSubmitted: (_) => _fetchProducts(),
@@ -383,16 +380,10 @@ class _PosScreenState extends State<PosScreen> {
               IconButton.filledTonal(
                 onPressed: () {
                   setState(() {
-                    _view = _view == ProductView.grid
-                        ? ProductView.list
-                        : ProductView.grid;
+                    _view = _view == ProductView.grid ? ProductView.list : ProductView.grid;
                   });
                 },
-                icon: Icon(
-                  _view == ProductView.grid
-                      ? Icons.view_list_rounded
-                      : Icons.grid_view_rounded,
-                ),
+                icon: Icon(_view == ProductView.grid ? Icons.view_list_rounded : Icons.grid_view_rounded),
               ),
               const SizedBox(width: 10),
               IconButton.filledTonal(
@@ -408,10 +399,7 @@ class _PosScreenState extends State<PosScreen> {
               prefixIcon: Icon(Icons.category_rounded),
               border: OutlineInputBorder(),
               hintText: 'Kategori',
-              contentPadding: EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 16,
-              ),
+              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
             ),
             items: [
               const DropdownMenuItem<int?>(
@@ -419,9 +407,7 @@ class _PosScreenState extends State<PosScreen> {
                 child: Text('Semua kategori'),
               ),
               ..._categories.map((c) {
-                final id = c['id'] is int
-                    ? c['id'] as int
-                    : int.tryParse('${c['id']}');
+                final id = c['id'] is int ? c['id'] as int : int.tryParse('${c['id']}');
                 final name = (c['name'] ?? '-').toString();
                 return DropdownMenuItem<int?>(value: id, child: Text(name));
               }).toList(),
@@ -438,11 +424,7 @@ class _PosScreenState extends State<PosScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final rupiah = NumberFormat.currency(
-      locale: 'id_ID',
-      symbol: 'Rp ',
-      decimalDigits: 0,
-    );
+    final rupiah = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
 
     return LayoutBuilder(
       builder: (context, cons) {
@@ -462,32 +444,28 @@ class _PosScreenState extends State<PosScreen> {
                             const Divider(height: 1),
                             Expanded(
                               child: _loading
-                                  ? const Center(
-                                      child: CircularProgressIndicator(),
-                                    )
+                                  ? const Center(child: CircularProgressIndicator())
                                   : (_error != null)
-                                  ? Center(child: Text(_error!))
-                                  : _products.isEmpty
-                                  ? const Center(
-                                      child: Text('Belum ada produk'),
-                                    )
-                                  : _view == ProductView.grid
-                                  ? _ProductGridKasirResponsive(
-                                      products: _products,
-                                      rupiah: rupiah,
-                                      qtyOf: _qtyOf,
-                                      onTapAdd: _addToCart,
-                                      onInc: (p) => _inc(p.id),
-                                      onDec: (p) => _dec(p.id),
-                                    )
-                                  : _ProductList(
-                                      products: _products,
-                                      rupiah: rupiah,
-                                      qtyOf: _qtyOf,
-                                      onTap: _addToCart,
-                                      onInc: (p) => _inc(p.id),
-                                      onDec: (p) => _dec(p.id),
-                                    ),
+                                      ? Center(child: Text(_error!))
+                                      : _products.isEmpty
+                                          ? const Center(child: Text('Belum ada produk'))
+                                          : _view == ProductView.grid
+                                              ? _ProductGridKasirResponsive(
+                                                  products: _products,
+                                                  rupiah: rupiah,
+                                                  qtyOf: _qtyOf,
+                                                  onTapAdd: _addToCart,
+                                                  onInc: (p) => _inc(p.id),
+                                                  onDec: (p) => _dec(p.id),
+                                                )
+                                              : _ProductList(
+                                                  products: _products,
+                                                  rupiah: rupiah,
+                                                  qtyOf: _qtyOf,
+                                                  onTap: _addToCart,
+                                                  onInc: (p) => _inc(p.id),
+                                                  onDec: (p) => _dec(p.id),
+                                                ),
                             ),
                           ],
                         ),
@@ -508,8 +486,7 @@ class _PosScreenState extends State<PosScreen> {
                           onSetPayMethod: (m) {
                             setState(() {
                               _payMethod = m;
-                              if (_payMethod != PayMethod.cash)
-                                _cashCtrl.text = '';
+                              if (_payMethod != PayMethod.cash) _cashCtrl.text = '';
                             });
                           },
                           onDec: (id) => _dec(id),
@@ -529,26 +506,26 @@ class _PosScreenState extends State<PosScreen> {
                         child: _loading
                             ? const Center(child: CircularProgressIndicator())
                             : (_error != null)
-                            ? Center(child: Text(_error!))
-                            : _products.isEmpty
-                            ? const Center(child: Text('Belum ada produk'))
-                            : _view == ProductView.grid
-                            ? _ProductGridKasirResponsive(
-                                products: _products,
-                                rupiah: rupiah,
-                                qtyOf: _qtyOf,
-                                onTapAdd: _addToCart,
-                                onInc: (p) => _inc(p.id),
-                                onDec: (p) => _dec(p.id),
-                              )
-                            : _ProductList(
-                                products: _products,
-                                rupiah: rupiah,
-                                qtyOf: _qtyOf,
-                                onTap: _addToCart,
-                                onInc: (p) => _inc(p.id),
-                                onDec: (p) => _dec(p.id),
-                              ),
+                                ? Center(child: Text(_error!))
+                                : _products.isEmpty
+                                    ? const Center(child: Text('Belum ada produk'))
+                                    : _view == ProductView.grid
+                                        ? _ProductGridKasirResponsive(
+                                            products: _products,
+                                            rupiah: rupiah,
+                                            qtyOf: _qtyOf,
+                                            onTapAdd: _addToCart,
+                                            onInc: (p) => _inc(p.id),
+                                            onDec: (p) => _dec(p.id),
+                                          )
+                                        : _ProductList(
+                                            products: _products,
+                                            rupiah: rupiah,
+                                            qtyOf: _qtyOf,
+                                            onTap: _addToCart,
+                                            onInc: (p) => _inc(p.id),
+                                            onDec: (p) => _dec(p.id),
+                                          ),
                       ),
                     ],
                   ),
@@ -613,10 +590,7 @@ class _CartSidePanel extends StatelessWidget {
                 const SizedBox(width: 8),
                 Text(
                   'Pesanan ($totalQty)',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w900,
-                    fontSize: 16,
-                  ),
+                  style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
                 ),
                 const Spacer(),
                 TextButton(
@@ -640,55 +614,31 @@ class _CartSidePanel extends StatelessWidget {
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                            color: cs.outlineVariant.withOpacity(0.6),
-                          ),
+                          border: Border.all(color: cs.outlineVariant.withOpacity(0.6)),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              item.product.name,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w900,
-                              ),
-                            ),
+                            Text(item.product.name, style: const TextStyle(fontWeight: FontWeight.w900)),
                             const SizedBox(height: 2),
-                            Text(
-                              item.product.category,
-                              style: TextStyle(
-                                color: Theme.of(context).hintColor,
-                              ),
-                            ),
+                            Text(item.product.category, style: TextStyle(color: Theme.of(context).hintColor)),
                             const SizedBox(height: 8),
                             Row(
                               children: [
-                                Text(
-                                  rupiah.format(item.subtotal),
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                                ),
+                                Text(rupiah.format(item.subtotal), style: const TextStyle(fontWeight: FontWeight.w900)),
                                 const Spacer(),
                                 IconButton(
                                   onPressed: () => onDec(item.product.id),
                                   icon: const Icon(Icons.remove_circle_outline),
                                 ),
-                                Text(
-                                  '${item.qty}',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                                ),
+                                Text('${item.qty}', style: const TextStyle(fontWeight: FontWeight.w900)),
                                 IconButton(
                                   onPressed: () => onInc(item.product.id),
                                   icon: const Icon(Icons.add_circle_outline),
                                 ),
                                 IconButton(
                                   onPressed: () => onRemove(item.product.id),
-                                  icon: const Icon(
-                                    Icons.delete_outline_rounded,
-                                  ),
+                                  icon: const Icon(Icons.delete_outline_rounded),
                                 ),
                               ],
                             ),
@@ -746,9 +696,11 @@ class _CartSidePanel extends StatelessWidget {
                   TextField(
                     controller: cashCtrl,
                     keyboardType: TextInputType.number,
+                    inputFormatters: [RupiahInputFormatter()],
                     decoration: const InputDecoration(
                       isDense: true,
                       labelText: 'Uang dibayar (cash)',
+                      prefixText: 'Rp ',
                       border: OutlineInputBorder(),
                     ),
                   ),
@@ -758,17 +710,11 @@ class _CartSidePanel extends StatelessWidget {
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: cs.outlineVariant.withOpacity(0.6),
-                    ),
+                    border: Border.all(color: cs.outlineVariant.withOpacity(0.6)),
                   ),
                   child: Column(
                     children: [
-                      _RowKeyVal(
-                        k: 'Total',
-                        v: rupiah.format(total),
-                        bold: true,
-                      ),
+                      _RowKeyVal(k: 'Total', v: rupiah.format(total), bold: true),
                       if (payMethod == PayMethod.cash) ...[
                         const SizedBox(height: 6),
                         _RowKeyVal(k: 'Dibayar', v: rupiah.format(cashPaid)),
@@ -786,16 +732,11 @@ class _CartSidePanel extends StatelessWidget {
                     onPressed: cart.isEmpty
                         ? null
                         : (payMethod == PayMethod.cash && cashPaid < total)
-                        ? null
-                        : onPay,
+                            ? null
+                            : onPay,
                     child: Text(
-                      payMethod == PayMethod.cash && cashPaid < total
-                          ? 'Uang kurang'
-                          : 'Bayar',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w900,
-                        fontSize: 16,
-                      ),
+                      payMethod == PayMethod.cash && cashPaid < total ? 'Uang kurang' : 'Bayar',
+                      style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
                     ),
                   ),
                 ),
@@ -899,10 +840,7 @@ class _ProductGridKasirResponsive extends StatelessWidget {
                           Align(
                             alignment: Alignment.topRight,
                             child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 7,
-                                vertical: 3,
-                              ),
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                               decoration: BoxDecoration(
                                 color: cs.primary.withOpacity(0.12),
                                 borderRadius: BorderRadius.circular(999),
@@ -952,9 +890,7 @@ class _ProductGridKasirResponsive extends StatelessWidget {
                             style: TextStyle(
                               fontWeight: FontWeight.w900,
                               fontSize: 12,
-                              color: q == 0
-                                  ? Theme.of(context).hintColor
-                                  : null,
+                              color: q == 0 ? Theme.of(context).hintColor : null,
                             ),
                           ),
                         ),
@@ -978,52 +914,6 @@ class _ProductGridKasirResponsive extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-class _MiniIconBtn extends StatelessWidget {
-  const _MiniIconBtn({
-    required this.icon,
-    required this.onPressed,
-    required this.enabled,
-    this.filled = false,
-  });
-
-  final IconData icon;
-  final VoidCallback? onPressed;
-  final bool enabled;
-  final bool filled;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-
-    return SizedBox(
-      width: 32,
-      height: 32,
-      child: Material(
-        color: filled
-            ? (enabled ? cs.primary : cs.primary.withOpacity(0.35))
-            : Colors.transparent,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-          side: filled
-              ? BorderSide.none
-              : BorderSide(color: cs.outlineVariant.withOpacity(0.7)),
-        ),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(10),
-          onTap: enabled ? onPressed : null,
-          child: Icon(
-            icon,
-            size: 18,
-            color: filled
-                ? cs.onPrimary
-                : (enabled ? cs.onSurface : cs.onSurface.withOpacity(0.35)),
-          ),
-        ),
-      ),
     );
   }
 }
@@ -1070,10 +960,7 @@ class _ProductList extends StatelessWidget {
             children: [
               Text(p.category, maxLines: 1, overflow: TextOverflow.ellipsis),
               const SizedBox(height: 4),
-              Text(
-                rupiah.format(p.price),
-                style: const TextStyle(fontWeight: FontWeight.w900),
-              ),
+              Text(rupiah.format(p.price), style: const TextStyle(fontWeight: FontWeight.w900)),
             ],
           ),
           trailing: Row(
@@ -1090,13 +977,7 @@ class _ProductList extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              Text(
-                '$q',
-                style: const TextStyle(
-                  fontWeight: FontWeight.w900,
-                  fontSize: 14,
-                ),
-              ),
+              Text('$q', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
               const SizedBox(width: 8),
               SizedBox(
                 width: 32,
