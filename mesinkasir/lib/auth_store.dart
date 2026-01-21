@@ -71,7 +71,7 @@ class AuthStore {
   static const _storage = FlutterSecureStorage();
   static const _tokenKey = 'auth_token';
 
-  static const String baseUrl = 'http://127.0.0.1:8000';
+  static const String baseUrl = 'http://172.17.47.103:8000';
 
   static Future<String?> token() => _storage.read(key: _tokenKey);
   static Future<void> saveToken(String token) =>
