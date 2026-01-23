@@ -61,6 +61,7 @@ class AuthUser {
   }
 }
 
+
 class AuthStore {
   AuthStore._();
 

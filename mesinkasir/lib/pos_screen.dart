@@ -44,10 +44,14 @@ class PosProduct {
     final id = rawId is int ? rawId.toString() : (rawId ?? '').toString();
 
     final rawPrice = json['price'];
-    final price = rawPrice is int ? rawPrice : int.tryParse('${rawPrice ?? 0}') ?? 0;
+    final price = rawPrice is int
+        ? rawPrice
+        : int.tryParse('${rawPrice ?? 0}') ?? 0;
 
     final cat = json['category'];
-    final categoryName = (cat is Map && cat['name'] != null) ? cat['name'].toString() : '-';
+    final categoryName = (cat is Map && cat['name'] != null)
+        ? cat['name'].toString()
+        : '-';
 
     return PosProduct(
       id: id,
@@ -68,7 +72,61 @@ class _CartItem {
 }
 
 enum PayMethod { cash, qris, transfer }
+
 enum ProductView { grid, list }
+
+class TxRow {
+  final String id;
+  final String groupId;
+  final int totalAmount;
+  final int paidAmount;
+  final int changeAmount;
+  final int payMethod; // 1 cash,2 qris,3 transfer
+  final DateTime? paidAt;
+  final List<dynamic> items;
+
+  TxRow({
+    required this.id,
+    required this.groupId,
+    required this.totalAmount,
+    required this.paidAmount,
+    required this.changeAmount,
+    required this.payMethod,
+    required this.paidAt,
+    required this.items,
+  });
+
+  factory TxRow.fromJson(Map<String, dynamic> json) {
+    DateTime? dt;
+    final raw = json['paid_at'];
+    if (raw is String) {
+      dt = DateTime.tryParse(raw);
+    }
+    return TxRow(
+      id: (json['id'] ?? '').toString(),
+      groupId: (json['group_id'] ?? '').toString(),
+      totalAmount: int.tryParse('${json['total_amount'] ?? 0}') ?? 0,
+      paidAmount: int.tryParse('${json['paid_amount'] ?? 0}') ?? 0,
+      changeAmount: int.tryParse('${json['change_amount'] ?? 0}') ?? 0,
+      payMethod: int.tryParse('${json['pay_method'] ?? 1}') ?? 1,
+      paidAt: dt,
+      items: (json['items'] is List) ? (json['items'] as List) : const [],
+    );
+  }
+
+  String get payMethodLabel {
+    switch (payMethod) {
+      case 1:
+        return 'Cash';
+      case 2:
+        return 'QRIS';
+      case 3:
+        return 'Transfer';
+      default:
+        return 'Unknown';
+    }
+  }
+}
 
 class PosScreen extends StatefulWidget {
   const PosScreen({super.key});
@@ -92,6 +150,8 @@ class _PosScreenState extends State<PosScreen> {
 
   PayMethod _payMethod = PayMethod.cash;
   ProductView _view = ProductView.grid;
+
+  bool _posting = false;
 
   @override
   void initState() {
@@ -199,7 +259,10 @@ class _PosScreenState extends State<PosScreen> {
       final data = root['data'];
 
       if (data is List) {
-        final list = data.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+        final list = data
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
         if (!mounted) return;
         setState(() => _categories = list);
       }
@@ -219,7 +282,9 @@ class _PosScreenState extends State<PosScreen> {
       if (_search.trim().isNotEmpty) qp['search'] = _search.trim();
       if (_categoryId != null) qp['category_id'] = _categoryId.toString();
 
-      final uri = Uri.parse('${AuthStore.baseUrl}/api/kasir/products').replace(queryParameters: qp);
+      final uri = Uri.parse(
+        '${AuthStore.baseUrl}/api/kasir/products',
+      ).replace(queryParameters: qp);
 
       final res = await http.get(
         uri,
@@ -273,16 +338,100 @@ class _PosScreenState extends State<PosScreen> {
     setState(() => _cart.clear());
   }
 
-  void _pay() {
+  int _payMethodCode(PayMethod m) {
+    switch (m) {
+      case PayMethod.cash:
+        return 1;
+      case PayMethod.qris:
+        return 2;
+      case PayMethod.transfer:
+        return 3;
+    }
+  }
+
+  Future<bool> _postTransactionToBackend() async {
+    try {
+      final t = await AuthStore.token();
+      if (t == null || t.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Token kosong, silakan login ulang')),
+        );
+        return false;
+      }
+
+      final items = _cart.values.map((it) {
+        final qty = it.qty;
+        final unitPrice = it.product.price;
+        final lineTotal = qty * unitPrice;
+
+        return {
+          "product_id": int.tryParse(it.product.id) ?? 0,
+          "name": it.product.name,
+          "qty": qty,
+          "unit_price": unitPrice,
+          "line_total": lineTotal,
+        };
+      }).toList();
+
+      final body = {
+        "pay_method": _payMethodCode(_payMethod),
+        "paid_amount": _payMethod == PayMethod.cash ? _cashPaid : _total,
+        "items": items,
+      };
+
+      final uri = Uri.parse('${AuthStore.baseUrl}/api/kasir/transactions');
+
+      final res = await http.post(
+        uri,
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $t',
+        },
+        body: jsonEncode(body),
+      );
+
+      if (res.statusCode == 201 || res.statusCode == 200) return true;
+
+      String msg = 'Gagal simpan transaksi (HTTP ${res.statusCode})';
+      try {
+        final decoded = jsonDecode(res.body);
+        if (decoded is Map && decoded['message'] != null) {
+          msg = decoded['message'].toString();
+        }
+      } catch (_) {}
+
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      return false;
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      return false;
+    }
+  }
+
+  Future<void> _pay() async {
     if (_cart.isEmpty) return;
+    if (_posting) return;
+
     if (_payMethod == PayMethod.cash && _cashPaid < _total) return;
 
+    setState(() => _posting = true);
+    final ok = await _postTransactionToBackend();
+    if (!mounted) return;
+    setState(() => _posting = false);
+
+    if (!ok) return;
+
+    final rupiah = NumberFormat.currency(
+      locale: 'id_ID',
+      symbol: 'Rp ',
+      decimalDigits: 0,
+    );
+
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Berhasil bayar: ${NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0).format(_total)}',
-        ),
-      ),
+      SnackBar(content: Text('Berhasil bayar: ${rupiah.format(_total)}')),
     );
 
     setState(() {
@@ -291,6 +440,83 @@ class _PosScreenState extends State<PosScreen> {
       _cashCtrl.text = '';
       _payMethod = PayMethod.cash;
     });
+  }
+
+  void _openCheckoutSheet() {
+    if (_cart.isEmpty) return;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (_) {
+        PayMethod sheetPayMethod = _payMethod;
+
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            void refreshSheet() => setModalState(() {});
+
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom,
+              ),
+              child: DraggableScrollableSheet(
+                expand: false,
+                initialChildSize: 0.92,
+                minChildSize: 0.55,
+                maxChildSize: 0.98,
+                builder: (context, scrollCtrl) {
+                  return _CartSidePanel(
+                    rupiah: NumberFormat.currency(
+                      locale: 'id_ID',
+                      symbol: 'Rp ',
+                      decimalDigits: 0,
+                    ),
+                    cart: _cart,
+                    totalQty: _totalQty,
+                    total: _total,
+                    noteCtrl: _noteCtrl,
+                    cashCtrl: _cashCtrl,
+                    payMethod: sheetPayMethod,
+                    change: sheetPayMethod == PayMethod.cash ? _change : 0,
+                    cashPaid: _cashPaid,
+                    posting: _posting,
+                    onSetPayMethod: (m) {
+                      setModalState(() => sheetPayMethod = m);
+                      setState(() {
+                        _payMethod = m;
+                        if (_payMethod != PayMethod.cash) _cashCtrl.text = '';
+                      });
+                    },
+                    onDec: (id) {
+                      _dec(id);
+                      refreshSheet();
+                    },
+                    onInc: (id) {
+                      _inc(id);
+                      refreshSheet();
+                    },
+                    onRemove: (id) {
+                      _remove(id);
+                      refreshSheet();
+                    },
+                    onClear: () {
+                      _clearCart();
+                      refreshSheet();
+                    },
+                    onPay: () async {
+                      await _pay();
+                      if (mounted) Navigator.of(context).pop();
+                    },
+                  );
+                },
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   Widget _filtersWide() {
@@ -304,7 +530,10 @@ class _PosScreenState extends State<PosScreen> {
                 prefixIcon: Icon(Icons.search_rounded),
                 hintText: 'Cari produk...',
                 border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 16,
+                ),
               ),
               onChanged: (v) => _search = v,
               onSubmitted: (_) => _fetchProducts(),
@@ -319,7 +548,10 @@ class _PosScreenState extends State<PosScreen> {
                 prefixIcon: Icon(Icons.category_rounded),
                 border: OutlineInputBorder(),
                 hintText: 'Kategori',
-                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 16,
+                ),
               ),
               items: [
                 const DropdownMenuItem<int?>(
@@ -327,7 +559,9 @@ class _PosScreenState extends State<PosScreen> {
                   child: Text('Semua kategori'),
                 ),
                 ..._categories.map((c) {
-                  final id = c['id'] is int ? c['id'] as int : int.tryParse('${c['id']}');
+                  final id = c['id'] is int
+                      ? c['id'] as int
+                      : int.tryParse('${c['id']}');
                   final name = (c['name'] ?? '-').toString();
                   return DropdownMenuItem<int?>(value: id, child: Text(name));
                 }).toList(),
@@ -342,10 +576,16 @@ class _PosScreenState extends State<PosScreen> {
           IconButton.filledTonal(
             onPressed: () {
               setState(() {
-                _view = _view == ProductView.grid ? ProductView.list : ProductView.grid;
+                _view = _view == ProductView.grid
+                    ? ProductView.list
+                    : ProductView.grid;
               });
             },
-            icon: Icon(_view == ProductView.grid ? Icons.view_list_rounded : Icons.grid_view_rounded),
+            icon: Icon(
+              _view == ProductView.grid
+                  ? Icons.view_list_rounded
+                  : Icons.grid_view_rounded,
+            ),
           ),
           const SizedBox(width: 10),
           IconButton.filledTonal(
@@ -370,7 +610,10 @@ class _PosScreenState extends State<PosScreen> {
                     prefixIcon: Icon(Icons.search_rounded),
                     hintText: 'Cari produk...',
                     border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 16,
+                    ),
                   ),
                   onChanged: (v) => _search = v,
                   onSubmitted: (_) => _fetchProducts(),
@@ -380,10 +623,16 @@ class _PosScreenState extends State<PosScreen> {
               IconButton.filledTonal(
                 onPressed: () {
                   setState(() {
-                    _view = _view == ProductView.grid ? ProductView.list : ProductView.grid;
+                    _view = _view == ProductView.grid
+                        ? ProductView.list
+                        : ProductView.grid;
                   });
                 },
-                icon: Icon(_view == ProductView.grid ? Icons.view_list_rounded : Icons.grid_view_rounded),
+                icon: Icon(
+                  _view == ProductView.grid
+                      ? Icons.view_list_rounded
+                      : Icons.grid_view_rounded,
+                ),
               ),
               const SizedBox(width: 10),
               IconButton.filledTonal(
@@ -399,7 +648,10 @@ class _PosScreenState extends State<PosScreen> {
               prefixIcon: Icon(Icons.category_rounded),
               border: OutlineInputBorder(),
               hintText: 'Kategori',
-              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 16,
+              ),
             ),
             items: [
               const DropdownMenuItem<int?>(
@@ -407,7 +659,9 @@ class _PosScreenState extends State<PosScreen> {
                 child: Text('Semua kategori'),
               ),
               ..._categories.map((c) {
-                final id = c['id'] is int ? c['id'] as int : int.tryParse('${c['id']}');
+                final id = c['id'] is int
+                    ? c['id'] as int
+                    : int.tryParse('${c['id']}');
                 final name = (c['name'] ?? '-').toString();
                 return DropdownMenuItem<int?>(value: id, child: Text(name));
               }).toList(),
@@ -422,17 +676,64 @@ class _PosScreenState extends State<PosScreen> {
     );
   }
 
+  Widget _productArea(NumberFormat rupiah) {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_error != null) return Center(child: Text(_error!));
+    if (_products.isEmpty) return const Center(child: Text('Belum ada produk'));
+
+    return _view == ProductView.grid
+        ? _ProductGridKasirResponsive(
+            products: _products,
+            rupiah: rupiah,
+            qtyOf: _qtyOf,
+            onTapAdd: _addToCart,
+            onInc: (p) => _inc(p.id),
+            onDec: (p) => _dec(p.id),
+          )
+        : _ProductList(
+            products: _products,
+            rupiah: rupiah,
+            qtyOf: _qtyOf,
+            onTap: _addToCart,
+            onInc: (p) => _inc(p.id),
+            onDec: (p) => _dec(p.id),
+          );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final rupiah = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
+    final rupiah = NumberFormat.currency(
+      locale: 'id_ID',
+      symbol: 'Rp ',
+      decimalDigits: 0,
+    );
 
     return LayoutBuilder(
       builder: (context, cons) {
-        final w = cons.maxWidth;
-        final isWide = w >= 1000;
+        final isWide = cons.maxWidth >= 1000;
 
         return Scaffold(
-          appBar: AppBar(title: const Text('POS')),
+          appBar: AppBar(
+            title: const Text('POS'),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.receipt_long_rounded),
+                tooltip: 'History',
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const TransactionHistoryScreen(),
+                    ),
+                  );
+                },
+              ),
+              if (!isWide)
+                IconButton(
+                  icon: const Icon(Icons.shopping_cart_outlined),
+                  onPressed: _cart.isEmpty ? null : _openCheckoutSheet,
+                ),
+            ],
+          ),
           body: SafeArea(
             child: isWide
                 ? Row(
@@ -442,31 +743,7 @@ class _PosScreenState extends State<PosScreen> {
                           children: [
                             _filtersWide(),
                             const Divider(height: 1),
-                            Expanded(
-                              child: _loading
-                                  ? const Center(child: CircularProgressIndicator())
-                                  : (_error != null)
-                                      ? Center(child: Text(_error!))
-                                      : _products.isEmpty
-                                          ? const Center(child: Text('Belum ada produk'))
-                                          : _view == ProductView.grid
-                                              ? _ProductGridKasirResponsive(
-                                                  products: _products,
-                                                  rupiah: rupiah,
-                                                  qtyOf: _qtyOf,
-                                                  onTapAdd: _addToCart,
-                                                  onInc: (p) => _inc(p.id),
-                                                  onDec: (p) => _dec(p.id),
-                                                )
-                                              : _ProductList(
-                                                  products: _products,
-                                                  rupiah: rupiah,
-                                                  qtyOf: _qtyOf,
-                                                  onTap: _addToCart,
-                                                  onInc: (p) => _inc(p.id),
-                                                  onDec: (p) => _dec(p.id),
-                                                ),
-                            ),
+                            Expanded(child: _productArea(rupiah)),
                           ],
                         ),
                       ),
@@ -483,17 +760,19 @@ class _PosScreenState extends State<PosScreen> {
                           payMethod: _payMethod,
                           change: _change,
                           cashPaid: _cashPaid,
+                          posting: _posting,
                           onSetPayMethod: (m) {
                             setState(() {
                               _payMethod = m;
-                              if (_payMethod != PayMethod.cash) _cashCtrl.text = '';
+                              if (_payMethod != PayMethod.cash)
+                                _cashCtrl.text = '';
                             });
                           },
                           onDec: (id) => _dec(id),
                           onInc: (id) => _inc(id),
                           onRemove: (id) => _remove(id),
                           onClear: _clearCart,
-                          onPay: _pay,
+                          onPay: () async => _pay(),
                         ),
                       ),
                     ],
@@ -502,34 +781,57 @@ class _PosScreenState extends State<PosScreen> {
                     children: [
                       _filtersMobile(),
                       const Divider(height: 1),
-                      Expanded(
-                        child: _loading
-                            ? const Center(child: CircularProgressIndicator())
-                            : (_error != null)
-                                ? Center(child: Text(_error!))
-                                : _products.isEmpty
-                                    ? const Center(child: Text('Belum ada produk'))
-                                    : _view == ProductView.grid
-                                        ? _ProductGridKasirResponsive(
-                                            products: _products,
-                                            rupiah: rupiah,
-                                            qtyOf: _qtyOf,
-                                            onTapAdd: _addToCart,
-                                            onInc: (p) => _inc(p.id),
-                                            onDec: (p) => _dec(p.id),
-                                          )
-                                        : _ProductList(
-                                            products: _products,
-                                            rupiah: rupiah,
-                                            qtyOf: _qtyOf,
-                                            onTap: _addToCart,
-                                            onInc: (p) => _inc(p.id),
-                                            onDec: (p) => _dec(p.id),
-                                          ),
-                      ),
+                      Expanded(child: _productArea(rupiah)),
                     ],
                   ),
           ),
+          bottomNavigationBar: isWide
+              ? null
+              : SafeArea(
+                  top: false,
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surface,
+                      border: Border(
+                        top: BorderSide(color: Theme.of(context).dividerColor),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Keranjang: $_totalQty item',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                rupiah.format(_total),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        FilledButton(
+                          onPressed: _cart.isEmpty || _posting
+                              ? null
+                              : _openCheckoutSheet,
+                          child: const Text('Checkout'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
         );
       },
     );
@@ -547,6 +849,7 @@ class _CartSidePanel extends StatelessWidget {
     required this.payMethod,
     required this.change,
     required this.cashPaid,
+    required this.posting,
     required this.onSetPayMethod,
     required this.onDec,
     required this.onInc,
@@ -567,12 +870,14 @@ class _CartSidePanel extends StatelessWidget {
   final int change;
   final int cashPaid;
 
+  final bool posting;
+
   final void Function(PayMethod m) onSetPayMethod;
   final void Function(String id) onDec;
   final void Function(String id) onInc;
   final void Function(String id) onRemove;
   final VoidCallback onClear;
-  final VoidCallback onPay;
+  final Future<void> Function() onPay;
 
   @override
   Widget build(BuildContext context) {
@@ -590,11 +895,14 @@ class _CartSidePanel extends StatelessWidget {
                 const SizedBox(width: 8),
                 Text(
                   'Pesanan ($totalQty)',
-                  style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 16,
+                  ),
                 ),
                 const Spacer(),
                 TextButton(
-                  onPressed: cart.isEmpty ? null : onClear,
+                  onPressed: cart.isEmpty || posting ? null : onClear,
                   child: const Text('Kosongkan'),
                 ),
               ],
@@ -614,31 +922,61 @@ class _CartSidePanel extends StatelessWidget {
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: cs.outlineVariant.withOpacity(0.6)),
+                          border: Border.all(
+                            color: cs.outlineVariant.withOpacity(0.6),
+                          ),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(item.product.name, style: const TextStyle(fontWeight: FontWeight.w900)),
+                            Text(
+                              item.product.name,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
                             const SizedBox(height: 2),
-                            Text(item.product.category, style: TextStyle(color: Theme.of(context).hintColor)),
+                            Text(
+                              item.product.category,
+                              style: TextStyle(
+                                color: Theme.of(context).hintColor,
+                              ),
+                            ),
                             const SizedBox(height: 8),
                             Row(
                               children: [
-                                Text(rupiah.format(item.subtotal), style: const TextStyle(fontWeight: FontWeight.w900)),
+                                Text(
+                                  rupiah.format(item.subtotal),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
                                 const Spacer(),
                                 IconButton(
-                                  onPressed: () => onDec(item.product.id),
+                                  onPressed: posting
+                                      ? null
+                                      : () => onDec(item.product.id),
                                   icon: const Icon(Icons.remove_circle_outline),
                                 ),
-                                Text('${item.qty}', style: const TextStyle(fontWeight: FontWeight.w900)),
+                                Text(
+                                  '${item.qty}',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
                                 IconButton(
-                                  onPressed: () => onInc(item.product.id),
+                                  onPressed: posting
+                                      ? null
+                                      : () => onInc(item.product.id),
                                   icon: const Icon(Icons.add_circle_outline),
                                 ),
                                 IconButton(
-                                  onPressed: () => onRemove(item.product.id),
-                                  icon: const Icon(Icons.delete_outline_rounded),
+                                  onPressed: posting
+                                      ? null
+                                      : () => onRemove(item.product.id),
+                                  icon: const Icon(
+                                    Icons.delete_outline_rounded,
+                                  ),
                                 ),
                               ],
                             ),
@@ -657,6 +995,7 @@ class _CartSidePanel extends StatelessWidget {
                   controller: noteCtrl,
                   minLines: 1,
                   maxLines: 2,
+                  enabled: !posting,
                   decoration: const InputDecoration(
                     isDense: true,
                     labelText: 'Pesan pelanggan',
@@ -669,7 +1008,9 @@ class _CartSidePanel extends StatelessWidget {
                     Expanded(
                       child: ChoiceChip(
                         selected: payMethod == PayMethod.cash,
-                        onSelected: (_) => onSetPayMethod(PayMethod.cash),
+                        onSelected: posting
+                            ? null
+                            : (_) => onSetPayMethod(PayMethod.cash),
                         label: const Text('Cash'),
                       ),
                     ),
@@ -677,7 +1018,9 @@ class _CartSidePanel extends StatelessWidget {
                     Expanded(
                       child: ChoiceChip(
                         selected: payMethod == PayMethod.qris,
-                        onSelected: (_) => onSetPayMethod(PayMethod.qris),
+                        onSelected: posting
+                            ? null
+                            : (_) => onSetPayMethod(PayMethod.qris),
                         label: const Text('QRIS'),
                       ),
                     ),
@@ -685,7 +1028,9 @@ class _CartSidePanel extends StatelessWidget {
                     Expanded(
                       child: ChoiceChip(
                         selected: payMethod == PayMethod.transfer,
-                        onSelected: (_) => onSetPayMethod(PayMethod.transfer),
+                        onSelected: posting
+                            ? null
+                            : (_) => onSetPayMethod(PayMethod.transfer),
                         label: const Text('Transfer'),
                       ),
                     ),
@@ -695,6 +1040,7 @@ class _CartSidePanel extends StatelessWidget {
                 if (payMethod == PayMethod.cash)
                   TextField(
                     controller: cashCtrl,
+                    enabled: !posting,
                     keyboardType: TextInputType.number,
                     inputFormatters: [RupiahInputFormatter()],
                     decoration: const InputDecoration(
@@ -710,11 +1056,17 @@ class _CartSidePanel extends StatelessWidget {
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: cs.outlineVariant.withOpacity(0.6)),
+                    border: Border.all(
+                      color: cs.outlineVariant.withOpacity(0.6),
+                    ),
                   ),
                   child: Column(
                     children: [
-                      _RowKeyVal(k: 'Total', v: rupiah.format(total), bold: true),
+                      _RowKeyVal(
+                        k: 'Total',
+                        v: rupiah.format(total),
+                        bold: true,
+                      ),
                       if (payMethod == PayMethod.cash) ...[
                         const SizedBox(height: 6),
                         _RowKeyVal(k: 'Dibayar', v: rupiah.format(cashPaid)),
@@ -729,14 +1081,23 @@ class _CartSidePanel extends StatelessWidget {
                   height: 50,
                   width: double.infinity,
                   child: FilledButton(
-                    onPressed: cart.isEmpty
+                    onPressed: posting
+                        ? null
+                        : cart.isEmpty
                         ? null
                         : (payMethod == PayMethod.cash && cashPaid < total)
-                            ? null
-                            : onPay,
+                        ? null
+                        : () async => onPay(),
                     child: Text(
-                      payMethod == PayMethod.cash && cashPaid < total ? 'Uang kurang' : 'Bayar',
-                      style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                      posting
+                          ? 'Menyimpan...'
+                          : (payMethod == PayMethod.cash && cashPaid < total)
+                          ? 'Uang kurang'
+                          : 'Bayar',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 16,
+                      ),
                     ),
                   ),
                 ),
@@ -840,7 +1201,10 @@ class _ProductGridKasirResponsive extends StatelessWidget {
                           Align(
                             alignment: Alignment.topRight,
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 3,
+                              ),
                               decoration: BoxDecoration(
                                 color: cs.primary.withOpacity(0.12),
                                 borderRadius: BorderRadius.circular(999),
@@ -890,7 +1254,9 @@ class _ProductGridKasirResponsive extends StatelessWidget {
                             style: TextStyle(
                               fontWeight: FontWeight.w900,
                               fontSize: 12,
-                              color: q == 0 ? Theme.of(context).hintColor : null,
+                              color: q == 0
+                                  ? Theme.of(context).hintColor
+                                  : null,
                             ),
                           ),
                         ),
@@ -960,7 +1326,10 @@ class _ProductList extends StatelessWidget {
             children: [
               Text(p.category, maxLines: 1, overflow: TextOverflow.ellipsis),
               const SizedBox(height: 4),
-              Text(rupiah.format(p.price), style: const TextStyle(fontWeight: FontWeight.w900)),
+              Text(
+                rupiah.format(p.price),
+                style: const TextStyle(fontWeight: FontWeight.w900),
+              ),
             ],
           ),
           trailing: Row(
@@ -977,7 +1346,13 @@ class _ProductList extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              Text('$q', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
+              Text(
+                '$q',
+                style: const TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 14,
+                ),
+              ),
               const SizedBox(width: 8),
               SizedBox(
                 width: 32,
@@ -1015,6 +1390,215 @@ class _RowKeyVal extends StatelessWidget {
         Expanded(child: Text(k, style: st)),
         Text(v, style: st),
       ],
+    );
+  }
+}
+
+class TransactionHistoryScreen extends StatefulWidget {
+  const TransactionHistoryScreen({super.key});
+
+  @override
+  State<TransactionHistoryScreen> createState() =>
+      _TransactionHistoryScreenState();
+}
+
+class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
+  bool _loading = true;
+  String? _error;
+  List<TxRow> _rows = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _fetch();
+  }
+
+  Future<void> _fetch() async {
+    try {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+
+      final t = await AuthStore.token();
+      if (t == null || t.isEmpty) {
+        setState(() {
+          _loading = false;
+          _error = 'Token kosong. Login ulang.';
+        });
+        return;
+      }
+
+      final uri = Uri.parse('${AuthStore.baseUrl}/api/kasir/transactions');
+
+      final res = await http.get(
+        uri,
+        headers: {'Accept': 'application/json', 'Authorization': 'Bearer $t'},
+      );
+
+      if (res.statusCode != 200) {
+        setState(() {
+          _loading = false;
+          _error = 'HTTP ${res.statusCode}';
+        });
+        return;
+      }
+
+      final decoded = jsonDecode(res.body);
+      // controller kita return: { data: paginate }
+      // paginate bentuknya: { data: [ ... ] }
+      final data = (decoded is Map) ? decoded['data'] : null;
+      final list = (data is Map && data['data'] is List)
+          ? (data['data'] as List)
+          : (decoded is Map && decoded['data'] is List)
+          ? (decoded['data'] as List)
+          : const [];
+
+      final rows = list
+          .whereType<Map>()
+          .map((e) => TxRow.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+
+      setState(() {
+        _rows = rows;
+        _loading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _loading = false;
+        _error = e.toString();
+      });
+    }
+  }
+
+  void _openDetail(TxRow tx) {
+    final rupiah = NumberFormat.currency(
+      locale: 'id_ID',
+      symbol: 'Rp ',
+      decimalDigits: 0,
+    );
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      useSafeArea: true,
+      builder: (_) {
+        return Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Transaksi #${tx.id}',
+                style: const TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 16,
+                ),
+              ),
+              const SizedBox(height: 8),
+              _RowKeyVal(k: 'Metode', v: tx.payMethodLabel),
+              const SizedBox(height: 6),
+              _RowKeyVal(
+                k: 'Total',
+                v: rupiah.format(tx.totalAmount),
+                bold: true,
+              ),
+              const SizedBox(height: 6),
+              _RowKeyVal(k: 'Dibayar', v: rupiah.format(tx.paidAmount)),
+              const SizedBox(height: 6),
+              _RowKeyVal(k: 'Kembalian', v: rupiah.format(tx.changeAmount)),
+              const SizedBox(height: 12),
+              const Divider(height: 1),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Items',
+                  style: const TextStyle(fontWeight: FontWeight.w900),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: ListView.separated(
+                  itemCount: tx.items.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (_, i) {
+                    final it = tx.items[i];
+                    if (it is! Map) return const SizedBox.shrink();
+                    final m = Map<String, dynamic>.from(it);
+                    final name = (m['name'] ?? '-').toString();
+                    final qty = int.tryParse('${m['qty'] ?? 0}') ?? 0;
+                    final line = int.tryParse('${m['line_total'] ?? 0}') ?? 0;
+                    return ListTile(
+                      dense: true,
+                      title: Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text('Qty: $qty'),
+                      trailing: Text(
+                        rupiah.format(line),
+                        style: const TextStyle(fontWeight: FontWeight.w900),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final rupiah = NumberFormat.currency(
+      locale: 'id_ID',
+      symbol: 'Rp ',
+      decimalDigits: 0,
+    );
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('History Transaksi'),
+        actions: [
+          IconButton(
+            onPressed: _fetch,
+            icon: const Icon(Icons.refresh_rounded),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : (_error != null)
+            ? Center(child: Text(_error!))
+            : _rows.isEmpty
+            ? const Center(child: Text('Belum ada transaksi'))
+            : ListView.separated(
+                itemCount: _rows.length,
+                separatorBuilder: (_, __) => const Divider(height: 1),
+                itemBuilder: (_, i) {
+                  final tx = _rows[i];
+                  final dateText = tx.paidAt == null
+                      ? '-'
+                      : DateFormat(
+                          'dd/MM/yyyy HH:mm',
+                        ).format(tx.paidAt!.toLocal());
+
+                  return ListTile(
+                    onTap: () => _openDetail(tx),
+                    title: Text(
+                      '${rupiah.format(tx.totalAmount)} • ${tx.payMethodLabel}',
+                      style: const TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                    subtitle: Text('ID: ${tx.id} • $dateText'),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                  );
+                },
+              ),
+      ),
     );
   }
 }

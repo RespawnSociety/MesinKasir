@@ -7,6 +7,7 @@ use App\Http\Controllers\Pengaturantoko\PengaturantokoController;
 use App\Http\Controllers\Product\ProductController;
 use App\Http\Controllers\Product\StockController;
 use App\Http\Controllers\Kasir\KasirTransaksiController;
+use App\Http\Controllers\Transaksi\TransactionController;
 
 Route::post('/login', [AuthController::class, 'login']);
 
@@ -59,5 +60,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/categories', [KasirTransaksiController::class, 'categories']);
         Route::get('/products', [KasirTransaksiController::class, 'products']);
         Route::get('/products/count', [KasirTransaksiController::class, 'productsCount']);
+
+
+        Route::get('/transactions', [TransactionController::class, 'index']);
+        Route::get('/transactions/{id}', [TransactionController::class, 'show']);
+
+        Route::get('/transactions/history', [TransactionController::class, 'history']);
+        Route::get('/transactions/history/{id}', [TransactionController::class, 'historyShow']);
+
+        Route::post('/transactions', [TransactionController::class, 'store']);
     });
 });
