@@ -27,7 +27,7 @@ class TransactionController extends Controller
     public function index(Request $request)
     {
       
-        $cashierId = auth()->id();
+       $cashierId = auth()->id(); 
 
         $q = Transaction::query()->where('cashier_id', $cashierId);
 
