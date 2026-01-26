@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'auth_store.dart';
+import 'rupiah_input_formatter.dart';
 
 class _StockItem {
   final int id;
@@ -27,16 +28,22 @@ class _StockItem {
     final bool active = rawActive is bool
         ? rawActive
         : rawActive is int
-            ? rawActive == 1
-            : (rawActive?.toString().toLowerCase() == '1' ||
-                rawActive?.toString().toLowerCase() == 'true');
+        ? rawActive == 1
+        : (rawActive?.toString().toLowerCase() == '1' ||
+              rawActive?.toString().toLowerCase() == 'true');
 
     return _StockItem(
-      id: (json['id'] is int) ? json['id'] as int : int.tryParse('${json['id']}') ?? 0,
+      id: (json['id'] is int)
+          ? json['id'] as int
+          : int.tryParse('${json['id']}') ?? 0,
       name: (json['name'] ?? '').toString(),
       unit: (json['unit'] ?? 'pcs').toString(),
-      qty: (json['qty'] is int) ? json['qty'] as int : int.tryParse('${json['qty']}') ?? 0,
-      buyPrice: (json['buy_price'] is int) ? json['buy_price'] as int : int.tryParse('${json['buy_price']}') ?? 0,
+      qty: (json['qty'] is int)
+          ? json['qty'] as int
+          : int.tryParse('${json['qty']}') ?? 0,
+      buyPrice: (json['buy_price'] is int)
+          ? json['buy_price'] as int
+          : int.tryParse('${json['buy_price']}') ?? 0,
       active: active,
     );
   }
@@ -50,7 +57,11 @@ class StockScreen extends StatefulWidget {
 }
 
 class _StockScreenState extends State<StockScreen> {
-  final rupiah = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
+  final rupiah = NumberFormat.currency(
+    locale: 'id_ID',
+    symbol: 'Rp ',
+    decimalDigits: 0,
+  );
 
   bool _loading = true;
   final List<_StockItem> _stocks = [];
@@ -67,7 +78,8 @@ class _StockScreenState extends State<StockScreen> {
     final body = _tryJson(res.body);
     if (body is Map) {
       final msg = body['message'];
-      if (msg != null && msg.toString().trim().isNotEmpty) return msg.toString();
+      if (msg != null && msg.toString().trim().isNotEmpty)
+        return msg.toString();
       final errors = body['errors'];
       if (errors is Map) {
         for (final v in errors.values) {
@@ -105,7 +117,9 @@ class _StockScreenState extends State<StockScreen> {
 
     if (res.statusCode != 200) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_errMsg(res))));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_errMsg(res))));
       setState(() => _loading = false);
       return;
     }
@@ -115,8 +129,16 @@ class _StockScreenState extends State<StockScreen> {
 
     _stocks.clear();
     if (list is List) {
-      _stocks.addAll(list.map((e) => _StockItem.fromJson(Map<String, dynamic>.from(e as Map))).toList());
-      _stocks.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      _stocks.addAll(
+        list
+            .map(
+              (e) => _StockItem.fromJson(Map<String, dynamic>.from(e as Map)),
+            )
+            .toList(),
+      );
+      _stocks.sort(
+        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+      );
     }
 
     if (!mounted) return;
@@ -145,7 +167,10 @@ class _StockScreenState extends State<StockScreen> {
     );
 
     if (res.statusCode != 200) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_errMsg(res))));
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_errMsg(res))));
       return false;
     }
 
@@ -173,7 +198,10 @@ class _StockScreenState extends State<StockScreen> {
     );
 
     if (res.statusCode != 201 && res.statusCode != 200) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_errMsg(res))));
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_errMsg(res))));
       return false;
     }
 
@@ -188,7 +216,10 @@ class _StockScreenState extends State<StockScreen> {
     );
 
     if (res.statusCode != 200) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_errMsg(res))));
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_errMsg(res))));
       return false;
     }
 
@@ -215,7 +246,9 @@ class _StockScreenState extends State<StockScreen> {
 
     if (!mounted) return;
     if (ok) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Stock berhasil dibuat ✅')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Stock berhasil dibuat ✅')));
     }
   }
 
@@ -239,7 +272,9 @@ class _StockScreenState extends State<StockScreen> {
 
     if (!mounted) return;
     if (ok) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Stock berhasil diupdate ✅')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Stock berhasil diupdate ✅')),
+      );
     }
   }
 
@@ -270,40 +305,45 @@ class _StockScreenState extends State<StockScreen> {
         child: _loading
             ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
             : _stocks.isEmpty
-                ? const Center(child: Text('Belum ada stock'))
-                : ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
-                    itemCount: _stocks.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 12),
-                    itemBuilder: (_, i) {
-                      final s = _stocks[i];
-                      return _StockFriendlyCard(
-                        item: s,
-                        buyPriceText: rupiah.format(s.buyPrice),
-                        onEdit: () => _openEditDialog(s),
-                        onToggleActive: (v) => _updateStock(s.id, active: v),
-                        onQtyChanged: (q) => _updateStock(s.id, qty: q),
-                        onDelete: () async {
-                          final yes = await showDialog<bool>(
-                            context: context,
-                            builder: (_) => AlertDialog(
-                              title: const Text('Hapus Stock'),
-                              content: Text('Yakin hapus "${s.name}"?'),
-                              actions: [
-                                TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Batal')),
-                                FilledButton(
-                                  style: FilledButton.styleFrom(backgroundColor: cs.error),
-                                  onPressed: () => Navigator.pop(context, true),
-                                  child: const Text('Hapus'),
-                                ),
-                              ],
+            ? const Center(child: Text('Belum ada stock'))
+            : ListView.separated(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
+                itemCount: _stocks.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 12),
+                itemBuilder: (_, i) {
+                  final s = _stocks[i];
+                  return _StockFriendlyCard(
+                    item: s,
+                    buyPriceText: rupiah.format(s.buyPrice),
+                    onEdit: () => _openEditDialog(s),
+                    onToggleActive: (v) => _updateStock(s.id, active: v),
+                    onQtyChanged: (q) => _updateStock(s.id, qty: q),
+                    onDelete: () async {
+                      final yes = await showDialog<bool>(
+                        context: context,
+                        builder: (_) => AlertDialog(
+                          title: const Text('Hapus Stock'),
+                          content: Text('Yakin hapus "${s.name}"?'),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, false),
+                              child: const Text('Batal'),
                             ),
-                          );
-                          if (yes == true) await _deleteStock(s.id);
-                        },
+                            FilledButton(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: cs.error,
+                              ),
+                              onPressed: () => Navigator.pop(context, true),
+                              child: const Text('Hapus'),
+                            ),
+                          ],
+                        ),
                       );
+                      if (yes == true) await _deleteStock(s.id);
                     },
-                  ),
+                  );
+                },
+              ),
       ),
     );
   }
@@ -403,7 +443,10 @@ class _StockFriendlyCardState extends State<_StockFriendlyCard> {
                     children: [
                       Text(
                         s.name,
-                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
                       const SizedBox(height: 6),
                       Wrap(
@@ -419,18 +462,21 @@ class _StockFriendlyCardState extends State<_StockFriendlyCard> {
                 ),
                 Column(
                   children: [
-                    const Text('Aktif', style: TextStyle(fontWeight: FontWeight.w700)),
-                    Switch(
-                      value: s.active,
-                      onChanged: widget.onToggleActive,
+                    const Text(
+                      'Aktif',
+                      style: TextStyle(fontWeight: FontWeight.w700),
                     ),
+                    Switch(value: s.active, onChanged: widget.onToggleActive),
                   ],
                 ),
               ],
             ),
 
             const SizedBox(height: 14),
-            Text('Jumlah (Qty)', style: TextStyle(color: muted, fontWeight: FontWeight.w700)),
+            Text(
+              'Jumlah (Qty)',
+              style: TextStyle(color: muted, fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: 8),
 
             // Qty stepper besar
@@ -448,11 +494,16 @@ class _StockFriendlyCardState extends State<_StockFriendlyCard> {
                     keyboardType: TextInputType.number,
                     inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                     textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
                     decoration: InputDecoration(
                       hintText: '0',
                       isDense: true,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
                     ),
                     onSubmitted: (_) => widget.onQtyChanged(_parseQty()),
                   ),
@@ -466,8 +517,16 @@ class _StockFriendlyCardState extends State<_StockFriendlyCard> {
                 Expanded(
                   child: FilledButton(
                     onPressed: () => widget.onQtyChanged(_parseQty()),
-                    style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
-                    child: const Text('Simpan Qty', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    child: const Text(
+                      'Simpan Qty',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -482,10 +541,18 @@ class _StockFriendlyCardState extends State<_StockFriendlyCard> {
                   child: OutlinedButton.icon(
                     onPressed: widget.onEdit,
                     icon: const Icon(Icons.edit_outlined),
-                    label: const Text('Ubah', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+                    label: const Text(
+                      'Ubah',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
                     ),
                   ),
                 ),
@@ -494,11 +561,19 @@ class _StockFriendlyCardState extends State<_StockFriendlyCard> {
                   child: FilledButton.icon(
                     onPressed: widget.onDelete,
                     icon: const Icon(Icons.delete_outline_rounded),
-                    label: const Text('Hapus', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+                    label: const Text(
+                      'Hapus',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
                     style: FilledButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       backgroundColor: Theme.of(context).colorScheme.error,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
                     ),
                   ),
                 ),
@@ -525,7 +600,9 @@ class _BigIconButton extends StatelessWidget {
       child: FilledButton(
         onPressed: onPressed,
         style: FilledButton.styleFrom(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           padding: EdgeInsets.zero,
         ),
         child: Icon(icon, size: 26),
@@ -541,7 +618,9 @@ class _Pill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.8);
+    final bg = Theme.of(
+      context,
+    ).colorScheme.surfaceContainerHighest.withOpacity(0.8);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
@@ -570,10 +649,7 @@ class _UpsertStockResult {
 }
 
 class _UpsertStockDialog extends StatefulWidget {
-  const _UpsertStockDialog({
-    required this.title,
-    this.initial,
-  });
+  const _UpsertStockDialog({required this.title, this.initial});
 
   final String title;
   final _StockItem? initial;
@@ -625,7 +701,10 @@ class _UpsertStockDialogState extends State<_UpsertStockDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(widget.title, style: const TextStyle(fontWeight: FontWeight.w900)),
+      title: Text(
+        widget.title,
+        style: const TextStyle(fontWeight: FontWeight.w900),
+      ),
       content: SizedBox(
         width: 520,
         child: Form(
@@ -638,7 +717,9 @@ class _UpsertStockDialogState extends State<_UpsertStockDialog> {
                   decoration: InputDecoration(
                     labelText: 'Nama Stock',
                     hintText: 'Contoh: Tepung Terigu',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
                   ),
                   validator: (v) {
                     final s = (v ?? '').trim();
@@ -652,10 +733,17 @@ class _UpsertStockDialogState extends State<_UpsertStockDialog> {
                   value: _unit,
                   decoration: InputDecoration(
                     labelText: 'Unit',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
                   ),
                   items: _units
-                      .map((u) => DropdownMenuItem<String>(value: u.value, child: Text(u.label)))
+                      .map(
+                        (u) => DropdownMenuItem<String>(
+                          value: u.value,
+                          child: Text(u.label),
+                        ),
+                      )
                       .toList(),
                   onChanged: (v) => setState(() => _unit = v ?? 'pcs'),
                 ),
@@ -666,10 +754,14 @@ class _UpsertStockDialogState extends State<_UpsertStockDialog> {
                       child: TextFormField(
                         controller: _qty,
                         keyboardType: TextInputType.number,
-                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
                         decoration: InputDecoration(
                           labelText: 'Qty',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
                         ),
                         validator: (_) {
                           final q = _parseInt(_qty);
@@ -683,11 +775,14 @@ class _UpsertStockDialogState extends State<_UpsertStockDialog> {
                       child: TextFormField(
                         controller: _buy,
                         keyboardType: TextInputType.number,
-                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        inputFormatters: [RupiahInputFormatter()],
                         decoration: InputDecoration(
                           labelText: 'Harga Beli',
                           hintText: 'Contoh: 12000',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+                          prefixText: 'Rp ',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
                         ),
                         validator: (_) {
                           final p = _parseInt(_buy);
@@ -702,8 +797,13 @@ class _UpsertStockDialogState extends State<_UpsertStockDialog> {
                 SwitchListTile(
                   value: _active,
                   onChanged: (v) => setState(() => _active = v),
-                  title: const Text('Stock Aktif', style: TextStyle(fontWeight: FontWeight.w800)),
-                  subtitle: const Text('Kalau dimatikan, stock tidak tampil untuk dipakai.'),
+                  title: const Text(
+                    'Stock Aktif',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  subtitle: const Text(
+                    'Kalau dimatikan, stock tidak tampil untuk dipakai.',
+                  ),
                   contentPadding: EdgeInsets.zero,
                 ),
               ],
@@ -720,9 +820,14 @@ class _UpsertStockDialogState extends State<_UpsertStockDialog> {
                 onPressed: () => Navigator.pop(context),
                 style: OutlinedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
                 ),
-                child: const Text('Batal', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+                child: const Text(
+                  'Batal',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                ),
               ),
             ),
             const SizedBox(width: 12),
@@ -743,9 +848,14 @@ class _UpsertStockDialogState extends State<_UpsertStockDialog> {
                 },
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
                 ),
-                child: const Text('Simpan', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
+                child: const Text(
+                  'Simpan',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+                ),
               ),
             ),
           ],
