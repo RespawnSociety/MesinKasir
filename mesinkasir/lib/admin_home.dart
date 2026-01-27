@@ -6,6 +6,7 @@ import 'reports_screen.dart';
 import 'stock_store_widget.dart';
 import 'auth_store.dart';
 import 'pengaturan_toko_screen.dart';
+import 'pengaturan_toko.dart';
 
 class AdminHome extends StatelessWidget {
   const AdminHome({super.key});
@@ -135,8 +136,9 @@ class AdminHome extends StatelessWidget {
                   subtitle: 'Nama, alamat, pajak',
                   tone: _Tone.orange,
                   onTap: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Toko: nanti kita bikin')),
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const PengaturTokoScreen()),
                     );
                   },
                 ),
@@ -146,9 +148,11 @@ class AdminHome extends StatelessWidget {
                   subtitle: 'Printer, metode bayar',
                   tone: _Tone.gray,
                   onTap: () {
-                   Navigator.push(
+                    Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (_) => const PengaturanTokoScreen()),
+                      MaterialPageRoute(
+                        builder: (_) => const PengaturanTokoScreen(),
+                      ),
                     );
                   },
                 ),

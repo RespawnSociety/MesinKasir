@@ -8,6 +8,7 @@ use App\Http\Controllers\Product\ProductController;
 use App\Http\Controllers\Product\StockController;
 use App\Http\Controllers\Kasir\KasirTransaksiController;
 use App\Http\Controllers\Transaksi\TransactionController;
+use App\Http\Controllers\Pengaturantoko\StoreSettingController;
 
 Route::post('/login', [AuthController::class, 'login']);
 
@@ -54,6 +55,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/products/{product}/stocks', [StockController::class, 'attachToProduct']);
     Route::patch('/products/{product}/stocks/{stock}', [StockController::class, 'updateProductStock']);
     Route::delete('/products/{product}/stocks/{stock}', [StockController::class, 'detachFromProduct']);
+
+    //UNTUK PENGATURAN TOKO
+    Route::get('/store-settings', [StoreSettingController::class, 'show']);
+    Route::put('/store-settings', [StoreSettingController::class, 'update']);
 
     //UNTUK KASIR TRANSAKSI
     Route::prefix('kasir')->group(function () {
